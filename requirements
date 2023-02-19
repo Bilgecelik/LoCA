@@ -1,0 +1,9 @@
+avalanche-lib==0.3.1
+avalanche-lib[detection]
+ray[default]
+ray[tune]
+ray[air]
+wandb
+torch
+numpy
+
