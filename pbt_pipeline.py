@@ -1,9 +1,8 @@
 from ray.tune.schedulers import PopulationBasedTraining
 from ray.tune.stopper import MaximumIterationStopper
 from ray import tune, air
-import numpy as np
 from cl_trainable import CLTrainable
-from ray.tune.utils import validate_save_restore
+from ray.air.integrations.wandb import WandbLoggerCallback
 import ray
 import argparse
 
@@ -60,19 +59,24 @@ def pbt_run(
             max_concurrent_trials=number_of_trials,
         ),
         run_config=air.RunConfig(
-            name="pbt_test",
+            name="PBT with CL - 1 PBT Step = 1 CL Experience",
             verbose=3,
             stop=MaximumIterationStopper(max_iter=number_of_steps),
             checkpoint_config=air.CheckpointConfig(
                 checkpoint_frequency=2,
                 checkpoint_at_end=True,
             ),
+            callbacks=[WandbLoggerCallback(project="OACL Trials", log_config=True)],
         ),
         param_space={
             "lr": tune.uniform(0.001, 1),
             "momentum": tune.uniform(0.001, 1),
             "device": device,
             "number_of_experiences": number_of_experiences,
+            "wandb": {
+                "project": "OACL Trials",
+                "group": trainable.trial_id,
+            }
         }
         )
 
@@ -85,7 +89,6 @@ def pbt_run(
     #Initial tune call
     print(best_loss)
     print(best_trial_config)
-    print(CLTrainable.get_auto_filled_metrics())
 
 
 parser = argparse.ArgumentParser(description='PBT run arguments')
@@ -97,11 +100,11 @@ parser.add_argument("-d", "--device",
 parser.add_argument("-e", "--number_of_experiences",
                     type=int,
                     help="number of experiences to generate in CL run.",
-                    default=10)
+                    default=5)
 parser.add_argument("-s", "--number_of_steps",
                     type=int,
                     help="number of iterations in PBT experiment.",
-                    default=10)
+                    default=5)
 parser.add_argument("-p", "--perturb_interval",
                     type=int,
                     help="#decide whether a trial should continue or exploit a different trial every this many training iterations",

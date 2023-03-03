@@ -2,17 +2,15 @@
 from ray import tune
 import torch
 import os
-from typing import Dict, Any, Callable, Optional
 
-from ray.tune.syncer import Syncer
+from ray.air.integrations.wandb import setup_wandb
 from torch.nn import CrossEntropyLoss
 from torch.optim import SGD
 from avalanche.benchmarks.classic import PermutedMNIST  # , RotatedMNIST, SplitMNIST
 from avalanche.models import SimpleMLP
 from avalanche.training.supervised import Naive
-from avalanche.logging import WandBLogger, InteractiveLogger
 from avalanche.evaluation.metrics import forgetting_metrics, accuracy_metrics, \
-    loss_metrics, timing_metrics
+    loss_metrics
 from avalanche.training.plugins import EvaluationPlugin
 
 WANDB_API_KEY='71b542c3072e07c51d1184841ffc50858ab2090e'
@@ -21,8 +19,6 @@ class CLTrainable(tune.Trainable):
     """Train a CL model with Trainable and PopulationBasedTraining
        scheduler.
     """
-
-
     def setup(self, config):
         self.device = torch.device("cuda:0" if config.get("device") == "gpu" else "cpu")
         self.benchmark = PermutedMNIST(n_experiences=config.get("number_of_experiences"), seed=1)
@@ -33,21 +29,11 @@ class CLTrainable(tune.Trainable):
             lr=config.get("lr", 0.01),
             momentum=config.get("momentum", 0.9)
         )
-        wandb_logger = WandBLogger(project_name="OACL-Initial Experiments",
-                                   run_name="OACL Naive Model - PermutedMNIST - PBT - "+self.trial_id,
-                                   log_artifacts=True,
-                                   config={
-                                       "dataset": self.benchmark,
-                                       "model": self.model,
-                                       "strategy": "Naive"
-                                   }
-                                   )
         self.eval_plugin = EvaluationPlugin(
             accuracy_metrics(minibatch=True, epoch=True, experience=True, stream=True),
             loss_metrics(minibatch=True, epoch=True, experience=True, stream=True),
             forgetting_metrics(experience=True, stream=True),
             strict_checks=False,
-            loggers=[wandb_logger, InteractiveLogger()],
         )
         self.strategy = Naive(
             self.model,
@@ -59,16 +45,19 @@ class CLTrainable(tune.Trainable):
             device=self.device,
             evaluator=self.eval_plugin
         )
-        self.experience = 0
 
     def step(self):
-        # step in CL is training on one experience, train on first half of task, evaluate on second half
-        self.strategy.train(self.benchmark.train_stream[self.experience])  # this needs to take next experience, not whole benchmark
-        print(f"Step is {self.experience} and current experience is:")
-        print(self.benchmark.train_stream[self.experience].current_experience)
-        step_loss = self.strategy.eval(self.benchmark.test_stream[0:self.experience])['Loss_Stream/eval_phase/test_stream/Task000']
-        self.experience += 1
-        return {"mean_loss": step_loss}
+        # step in CL: Train on next experience and evaluate on experiences 0-current.
+        print(f"Training on current experience: {self.benchmark.train_stream[self.iteration].current_experience}")
+        self.strategy.train(self.benchmark.train_stream[self.iteration])  # this needs to take next experience, not whole benchmark
+        print(f"Evaluating on experiences: 0 - {self.benchmark.train_stream[self.iteration].current_experience}")
+        step_loss = self.strategy.eval(self.benchmark.test_stream[0:self.iteration+1])['Loss_Stream/eval_phase/test_stream/Task000']
+        step_accuracy = self.strategy.eval(self.benchmark.test_stream[0:self.iteration+1])['Top1_Acc_Stream/eval_phase/test_stream/Task000']
+        step_forgetting = self.strategy.eval(self.benchmark.test_stream[0:self.iteration+1])['StreamForgetting/eval_phase/test_stream']
+        return {"mean_loss": step_loss,
+                "mean_accuracy": step_accuracy,
+                "mean_forgetting": step_forgetting,
+                "current_experience": self.iteration}
 
     def save_checkpoint(self, checkpoint_dir):
         checkpoint_path = os.path.join(checkpoint_dir, "model.pth")
