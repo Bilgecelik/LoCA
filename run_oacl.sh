@@ -16,5 +16,6 @@ python oacl/pbt_pipeline.py \
 --perturb_interval 2 \
 --number_of_trials 2 \
 --quantile_fraction 0.5 \
---resample_probability 0.5 > results_oacl.txt
+--resample_probability 0.5 \
+--description limited_search_space_lr > results_oacl.txt
 echo end of OACL run

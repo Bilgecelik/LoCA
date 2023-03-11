@@ -26,7 +26,7 @@ class CLTrainable(tune.Trainable):
         self.model = SimpleMLP(num_classes=10)  # start with new model
         self.optimizer = SGD(
             self.model.parameters(),
-            lr=config.get("lr", 0.01),
+            lr=config.get("lr", 0.001),
             momentum=config.get("momentum", 0.9)
         )
         self.eval_plugin = EvaluationPlugin(
@@ -51,20 +51,22 @@ class CLTrainable(tune.Trainable):
         print(f"Training on current experience: {self.benchmark.train_stream[self.iteration].current_experience}")
         self.strategy.train(self.benchmark.train_stream[self.iteration])  # this needs to take next experience, not whole benchmark
         print(f"Evaluating on experiences: 0 - {self.benchmark.train_stream[self.iteration].current_experience}")
-        step_loss = self.strategy.eval(self.benchmark.test_stream[0:self.iteration+1])['Loss_Stream/eval_phase/test_stream/Task000']
-        step_accuracy = self.strategy.eval(self.benchmark.test_stream[0:self.iteration+1])['Top1_Acc_Stream/eval_phase/test_stream/Task000']
-        step_forgetting = self.strategy.eval(self.benchmark.test_stream[0:self.iteration+1])['StreamForgetting/eval_phase/test_stream']
+        step_loss = self.strategy.eval(self.benchmark.test_stream[:self.iteration+1])['Loss_Stream/eval_phase/test_stream/Task000']
+        step_accuracy = self.strategy.eval(self.benchmark.test_stream[:self.iteration+1])['Top1_Acc_Stream/eval_phase/test_stream/Task000']
+        step_forgetting = self.strategy.eval(self.benchmark.test_stream[:self.iteration+1])['StreamForgetting/eval_phase/test_stream']
         return {"mean_loss": step_loss,
                 "mean_accuracy": step_accuracy,
                 "mean_forgetting": step_forgetting,
                 "current_experience": self.iteration}
 
     def save_checkpoint(self, checkpoint_dir):
+        print(f"Checkpoint saved at training iteration {self.training_iteration} with trial {self.trial_id}.")
         checkpoint_path = os.path.join(checkpoint_dir, "model.pth")
         torch.save(self.model.state_dict(), checkpoint_path)
         return checkpoint_path
 
     def load_checkpoint(self, checkpoint_path):
+        print(f"Checkpoint loaded at training iteration {self.training_iteration} with trial {self.trial_id}.")
         self.model.load_state_dict(torch.load(checkpoint_path))
 
     def _export_model(self, export_formats, export_dir):

@@ -5,6 +5,11 @@ from cl_trainable import CLTrainable
 from ray.air.integrations.wandb import WandbLoggerCallback
 import ray
 import argparse
+import numpy as np
+import random
+
+random.seed(1234)
+np.random.seed(5678)
 
 # both of these should return (to catch save/load checkpoint errors before execution)
 ray.init()
@@ -19,6 +24,7 @@ def pbt_run(
         number_of_trials: int,
         quantile_fraction: float,
         resample_probability: float,
+        description: str,
     ):
 
     """
@@ -40,9 +46,10 @@ def pbt_run(
         mode="min",
         resample_probability=resample_probability,
         hyperparam_mutations={
-            "lr": tune.qloguniform(5e-3, 1e-1, 5e-4),
-            "momentum": tune.qloguniform(5e-3, 1e-1, 5e-4),
+            "lr": tune.loguniform(0.01, 0.1),
+            #"momentum": tune.uniform(0.7, 1),
         }, #specifies the hps that should be perturbed by PBT and defines the resample distribution for each hp
+        synch=True,
     )
 
     if device == 'cpu':
@@ -59,18 +66,18 @@ def pbt_run(
             max_concurrent_trials=number_of_trials,
         ),
         run_config=air.RunConfig(
-            name="PBT with CL - 1 PBT Step = 1 CL Experience",
+            name=f"PBT_CL_Experiments_{description}",
             verbose=3,
             stop=MaximumIterationStopper(max_iter=number_of_steps),
             checkpoint_config=air.CheckpointConfig(
-                checkpoint_frequency=2,
+                checkpoint_frequency=1,
                 checkpoint_at_end=True,
             ),
             callbacks=[WandbLoggerCallback(project="OACL Trials", log_config=True)],
         ),
         param_space={
-            "lr": tune.uniform(0.001, 1),
-            "momentum": tune.uniform(0.001, 1),
+            "lr": 0.01,
+            #"momentum": 0.9,
             "device": device,
             "number_of_experiences": number_of_experiences,
             "wandb": {
@@ -124,9 +131,14 @@ parser.add_argument("-r", "--resample_probability",
                     help="resampling and mutation both happen with this probability",
                     default=0.5
                     )
-
+parser.add_argument("-de", "--description",
+                    type=str,
+                    help="short description of the experiment setup",
+                    default='no_description'
+                    )
 
 args = parser.parse_args()
+print(args)
 
 pbt_run(
     device = args.device,
