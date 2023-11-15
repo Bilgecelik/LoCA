@@ -32,7 +32,7 @@ def cl_test_run(
                     momentum=config["momentum"])
 
     # plot with wandb
-    wandb_logger = WandBLogger(project_name="OACL Trials",
+    wandb_logger = WandBLogger(project_name="LOCA Trials",
                                run_name="CL_Solo",
                                log_artifacts=True,
                                config={

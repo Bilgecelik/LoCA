@@ -62,7 +62,7 @@ def pbt_run(
             "train_epochs": cl_train_epochs,
             "eval_mb_size": cl_eval_mb_size,
             "wandb": {
-                "project": "OACL Trials",
+                "project": "LOCA Trials",
                 "group": trainable.trial_id,
             },
             "checkpoint_frequency": checkpoint_frequency,
@@ -100,7 +100,7 @@ def pbt_run(
         stop=tune.stopper.MaximumIterationStopper(max_iter=number_of_steps),
         checkpoint_freq=min(perturb_interval, checkpoint_frequency),
         checkpoint_at_end=True,
-        callbacks=[ray.air.integrations.wandb.WandbLoggerCallback(project="OACL Trials", log_config=True),
+        callbacks=[ray.air.integrations.wandb.WandbLoggerCallback(project="LOCA Trials", log_config=True),
                    # callback_on_iteration,
                    # select_best_trial,
         ],
