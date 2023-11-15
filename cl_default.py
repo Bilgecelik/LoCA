@@ -86,24 +86,24 @@ parser.add_argument("-e", "--number_of_experiences",
                     type=int,
                     help="number of experiences to generate in CL run.",
                     default=5)
-parser.add_argument("--optimal_lr",
+parser.add_argument("--lr",
                     type=float,
-                    help="optimal learning rate for cl run",
+                    help="learning rate for cl run",
                     default=0.001)
-parser.add_argument("--optimal_momentum",
+parser.add_argument("--momentum",
                     type=float,
-                    help="optimal momentum for cl run",
+                    help="momentum for cl run",
                     default=0.9)
 
 
 args = parser.parse_args()
 
-optimal_config = {"lr": args.optimal_lr,
-                  "momentum": args.optimal_momentum}
+config = {"lr": args.lr,
+                  "momentum": args.momentum}
 
 cl_run(
     device = args.device,
     number_of_experiences= args.number_of_experiences,
-    config= optimal_config
+    config= config
 )
 
