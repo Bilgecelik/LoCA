@@ -1,2 +1,2 @@
-# oacl
-Online Automated Continual Learning
+# LoCA
+Learning Online Continual data with AutoML
