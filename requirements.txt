@@ -1,0 +1,7 @@
+ray[default]
+ray[tune]
+ray[air]
+wandb
+torch
+numpy
+
