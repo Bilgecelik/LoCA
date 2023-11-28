@@ -9,7 +9,7 @@
 echo start of OACL run
 source activate py3_10
 wandb login 71b542c3072e07c51d1184841ffc50858ab2090e
-python oacl/pbt_pipeline.py \
+python loca/run_pbt.py \
 --device gpu \
 --number_of_experiences 5 \
 --number_of_steps 5 \
