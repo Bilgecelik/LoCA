@@ -1,12 +1,10 @@
 from ray.tune.schedulers import PopulationBasedTraining
-from ray.tune.stopper import MaximumIterationStopper
-from ray import tune, air
-from cl_trainable import CLTrainable
-from ray.air.integrations.wandb import WandbLoggerCallback
+from ray import tune
 import ray
 
 import numpy as np
 import random
+from typing import Dict, Any
 from ray.tune.utils import validate_save_restore
 WANDB_API_KEY='71b542c3072e07c51d1184841ffc50858ab2090e'
 
@@ -14,67 +12,17 @@ random.seed(1234)
 np.random.seed(5678)
 
 ray.init()
-
-def pbt_run(
-        device: str,
-        number_of_experiences: int,
-        number_of_steps: int,
-        perturb_interval: int,
-        number_of_trials: int,
-        quantile_fraction: float,
-        resample_probability: float,
-        search_criterion: str,
-        search_mode: str,
-        description: str,
-        cl_train_mb_size: int,
-        cl_train_epochs: int,
-        cl_eval_mb_size: int,
-        checkpoint_frequency: int,
-    ):
-
-    """
-    :param resample_probability:
-    :param quantile_fraction:
-    :param device:
-    :param number_of_experiences:
-    :param number_of_steps:
-    :param perturb_interval:
-    :param number_of_trials:
-    """
-
-    # # Define trainable class based on device
-    trainable = CLTrainable
-
-    # both of these should return (to catch save/load checkpoint errors before execution)
-    # validate_save_restore(CLTrainable)
-    # validate_save_restore(CLTrainable, use_object_store=True)
-
-    #search space and other configurations
-    config = {
-            "lr": 0.01,
-            "prompt_pool_size": 20,
-            "prompt_length": 5,
-            "top_k": 5,
-            "device": device,
-            "number_of_experiences": number_of_experiences,
-            "train_mb_size": cl_train_mb_size,
-            "train_epochs": cl_train_epochs,
-            "eval_mb_size": cl_eval_mb_size,
-            "wandb": {
-                "project": "LOCA Trials",
-                "group": trainable.trial_id,
-            },
-            "checkpoint_frequency": checkpoint_frequency,
-            "number_of_trials": number_of_trials,
-        }
-    #tune parameters
+def setup_pbt(
+        pbt_config: Dict
+) -> Any:
+    #setup pbt search
     scheduler = PopulationBasedTraining(
         time_attr="training_iteration",
-        perturbation_interval=perturb_interval,
-        quantile_fraction=quantile_fraction,
-        metric = search_criterion,
-        mode=search_mode,
-        resample_probability=resample_probability,
+        perturbation_interval=pbt_config["perturb_interval"],
+        quantile_fraction=pbt_config["quantile_fraction"],
+        metric = pbt_config["search_criterion"],
+        mode=pbt_config["search_mode"],
+        resample_probability=pbt_config["resample_probability"],
         hyperparam_mutations={
             "lr": tune.loguniform(0.01, 0.1),
             "prompt_pool_size":tune.randint(5,30),
@@ -84,43 +32,50 @@ def pbt_run(
         synch=True,
     )
 
+    return scheduler
+
+def pbt_search(
+        train_data,
+        validation_data,
+        scheduler,
+        search_config: Dict,
+        pbt_config: Dict,
+        trainable,
+    ):
+
+    # both of these should return (to catch save/load checkpoint errors before execution)
+    validate_save_restore(trainable)
+    validate_save_restore(trainable, use_object_store=True)
+
+    #add recent data to trainable config
+    search_config["train_data"] = train_data
+    search_config["validation_data"] = validation_data
+
     # Use ray.tune.run() for asynchronous optimization
     analysis = tune.run(
-        CLTrainable,
-        name=f"PBT_CL_Experiments_{description}",
-        config=config,
+        trainable,
+        name=f"PBT_CL_Experiments_{pbt_config['description']}",
+        config=search_config,
         scheduler=scheduler,
         #reuse_actors=True,
-        num_samples=number_of_trials,
-        max_concurrent_trials=number_of_trials,
+        num_samples=pbt_config['number_of_trials'],
+        max_concurrent_trials=pbt_config['number_of_trials'],
         max_failures=1,  # Number of failures before terminating
         local_dir="./ray_results",  # Directory for storing logs and checkpoints
         verbose=3,
-        stop=tune.stopper.MaximumIterationStopper(max_iter=number_of_steps),
-        checkpoint_freq=min(perturb_interval, checkpoint_frequency),
+        stop=tune.stopper.MaximumIterationStopper(max_iter=pbt_config['number_of_steps']),
+        checkpoint_freq=min(pbt_config["perturb_interval"], pbt_config["checkpoint_frequency"]),
         checkpoint_at_end=True,
-        callbacks=[ray.air.integrations.wandb.WandbLoggerCallback(project="LOCA Trials", log_config=True),
-                   # callback_on_iteration,
-                   # select_best_trial,
-        ],
         resources_per_trial={"gpu": 1},
     )
 
     print(analysis.results)
 
-    # Shutdown Ray
-    ray.shutdown()
+    # Gets best trial based on max accuracy across all training iterations.
+    best_trial = analysis.get_best_trial(metric="accuracy", mode="max", scope="all")
+    # Gets best checkpoint for trial based on accuracy.
+    best_checkpoint = analysis.get_best_checkpoint(best_trial, metric="accuracy")
 
-    # # Access the callback data for each iteration
-    # for iteration, data in enumerate(callback_iteration_list, start=1):
-    #     print(f"Iteration {iteration} - Callback Data:")
-    #     print(data)
-    #     print("")
-    #
-    # # Access the best trial data for each iteration
-    # for iteration, data in enumerate(best_trial_list, start=1):
-    #     print(f"Iteration {iteration} - Callback Data:")
-    #     print(data)
-    #     print("")
+    return best_checkpoint
 
 

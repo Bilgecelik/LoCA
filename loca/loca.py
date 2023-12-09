@@ -5,9 +5,13 @@
 #Get PBT run result (best_trial) and compare with current pipeline
 #Continue CL with the best setup from next data point
 
-from data import make_stream
-from models.search import pbt_run
-from models import continual_strategy
+from data.make_stream import make_stream
+from models.continual_strategy import l2p_strategy
+from models.search import setup_pbt, pbt_search
+
+from models.cl_trainable import CLTrainable
+
+
 import argparse
 import sys
 import wandb
@@ -17,20 +21,23 @@ wandb.login()
 def main():
     print(sys.argv)
     parser = argparse.ArgumentParser(description='PBT run arguments')
-
+    parser.add_argument("-d", "--device",
+                        type=str,
+                        help="device to use for CL and PBT experiments: 'cpu' or 'gpu'",
+                        default='cpu')
     parser.add_argument("-da", "--data",
                         type=str,
                         help="input data to make continual stream - currently only supports CIR with 'cifar100'",
                         default='cifar100'
                         )
-    parser.add_argument("-d", "--device",
-                        type=str,
-                        help="device to use for CL and PBT experiments: 'cpu' or 'gpu'",
-                        default='cpu')
     parser.add_argument("-e", "--number_of_experiences",
                         type=int,
                         help="number of experiences to generate in CL run.",
                         default=5)
+    parser.add_argument("-s_e", "--samples_per_experience",
+                        type=int,
+                        help="number of samples in each experience",
+                        default=500)
     parser.add_argument("-s", "--number_of_steps",
                         type=int,
                         help="number of iterations in PBT experiment.",
@@ -53,11 +60,6 @@ def main():
                         type=float,
                         help="resampling and mutation both happen with this probability",
                         default=0.5
-                        )
-    parser.add_argument("-de", "--description",
-                        type=str,
-                        help="short description of the experiment setup",
-                        default='no_description'
                         )
     parser.add_argument("-tmb", "--cl_train_mb_size",
                         type=int,
@@ -89,17 +91,21 @@ def main():
                         help="number of steps between checkpointing, good to set to the perturbation interval",
                         default=5,
                         )
+    parser.add_argument("-de", "--description",
+                        type=str,
+                        help="short description of the experiment setup",
+                        default='no_description'
+                        )
 
     args = parser.parse_args()
     print(args)
 
     #generate stream
     benchmark, test_stream = make_stream(number_of_experiences = args.number_of_experiences,
-                                         s_e = args.s_e,
-                                         p_a = args.p_a)
+                                         s_e = args.samples_per_experience)
 
     #setup search config
-    config = {
+    cl_config = {
             "lr": 0.01,
             "prompt_pool_size": 20,
             "prompt_length": 5,
@@ -110,17 +116,28 @@ def main():
             "train_epochs": args.cl_train_epochs,
             "eval_mb_size": args.cl_eval_mb_size,
             "checkpoint_frequency": args.checkpoint_frequency,
-            "number_of_trials": args.number_of_trials,
+            "description": args.description,
         }
+    pbt_config = {
+        "number_of_trials": args.number_of_trials,
+        "perturb_interval": args.perturb_interval,
+        "quantile_fraction": args.quantile_fraction,
+        "search_criterion": args.search_criterion,
+        "search_mode": args.search_mode,
+        "resample_probability": args.resample_probability,
+        "number_of_steps": args.number_of_steps,
+        "description": args.description,
+        "checkpoint_frequency": args.checkpoint_frequency,
+    }
 
     #setup defaults for hps
-    learning_rate = config['lr']
-    prompt_pool_size = config['prompt_pool_size']
-    prompt_length = config['prompt_length']
-    top_k = config['top_k']
+    learning_rate = cl_config['lr']
+    prompt_pool_size = cl_config['prompt_pool_size']
+    prompt_length = cl_config['prompt_length']
+    top_k = cl_config['top_k']
 
-    #setup strategy
-    strategy = continual_strategy(device=args.device,
+    #setup cl strategy
+    strategy = l2p_strategy(device=args.device,
                                   num_classes=benchmark.first_occurrences.shape[0],
                                   learning_rate=learning_rate,
                                   train_mb_size=args.train_mb_size,
@@ -130,19 +147,21 @@ def main():
                                   prompt_length=prompt_length,
                                   top_k=top_k,
                                   )
+    #setup pbt
+    search_scheduler = setup_pbt(pbt_config)
 
     #setup logging
     run = wandb.init(
         # Set the project where this run will be logged
         project="LOCA-Main Flow",
         # Track hyperparameters and run metadata
-        config=config)
+        config=cl_config)
 
-    #CL flow
+    #CL flow - prompt fitting starting from scratch each time
     #can strategy start from checkpoint for prompt weights with new hp's?
 
     results = []
-    for experience in benchmark.train_stream:
+    for i, experience in enumerate(benchmark.train_stream):
         #cl flow
         print('Starting experiment...')
 
@@ -160,26 +179,22 @@ def main():
         results.append({'experience': experience.current_experience, 'loss': loss, 'accuracy': accuracy, 'forgetting': forgetting})
         wandb.log(results[-1])
 
+        #start search
+        best_search_checkpoint = pbt_search(
+            train_data = experience,
+            validation_data = benchmark.test_stream[:i],
+            scheduler = search_scheduler,
+            search_config = cl_config,
+            trainable=CLTrainable,
+            pbt_config=pbt_config,
+        )
+        strategy.model = strategy.model.load_state_dict(best_search_checkpoint["model"])
+        print("New strategy is:")
+        print(strategy)
+        print("Checkpoint model dictionary is:")
+        print(best_search_checkpoint["model"])
+
     wandb.finish()
-
-
-    ### to be added to the loop
-    pbt_run(
-        device=args.device,
-        number_of_experiences=args.number_of_experiences,
-        number_of_steps=args.number_of_steps,
-        perturb_interval=args.perturb_interval,
-        number_of_trials=args.number_of_trials,
-        quantile_fraction=args.quantile_fraction,
-        resample_probability=args.resample_probability,
-        description=args.description,
-        cl_train_mb_size=args.cl_train_mb_size,
-        cl_eval_mb_size=args.cl_eval_mb_size,
-        cl_train_epochs=args.cl_train_epochs,
-        search_criterion=args.search_criterion,
-        search_mode=args.search_mode,
-        checkpoint_frequency=args.checkpoint_frequency,
-    )
 
 
 if __name__ == "__main__":

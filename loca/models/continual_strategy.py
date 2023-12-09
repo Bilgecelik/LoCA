@@ -6,8 +6,9 @@ from avalanche.logging import WandBLogger, InteractiveLogger
 from avalanche.evaluation.metrics import forgetting_metrics, accuracy_metrics, \
     loss_metrics
 from avalanche.training.plugins import EvaluationPlugin
+from typing import Any
 
-def continual_strategy(
+def l2p_strategy(
         device: str,
         num_classes: int,
         learning_rate: float,
@@ -17,7 +18,7 @@ def continual_strategy(
         prompt_pool_size: int,
         prompt_length: int,
         top_k: int,
-) -> None:
+    ) -> Any:
 
     device = torch.device("cuda:0" if device == "gpu" else "cpu")
 
